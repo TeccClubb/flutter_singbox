@@ -1,0 +1,111 @@
+group = "com.tecclub.flutter_singbox"
+version = "1.0"
+
+buildscript {
+    ext.kotlin_version = "2.0.21"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.1.0")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    if (project.android.hasProperty("namespace")) {
+        namespace "com.tecclub.flutter_singbox"
+    }
+
+    compileSdkVersion 34
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    
+    // Packaging options
+    packagingOptions {
+        resources {
+            pickFirsts += ['META-INF/INDEX.LIST', 'META-INF/io.netty.versions.properties']
+        }
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+
+    defaultConfig {
+        minSdkVersion 21
+    }
+
+    dependencies {
+        // For .jar files only
+        implementation(fileTree(dir: "libs", include: ["*.jar"]))
+        
+        // AAR file implementation using flatDir
+        implementation(name: "libcore", ext: "aar")
+        
+        // Core Android dependencies
+        implementation "androidx.core:core-ktx:1.12.0"
+        implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.7.0"
+        
+        // LiveData and ViewModel for state management
+        implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.7.0"
+        implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0"
+        
+        // Coroutines for async operations
+        implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+        implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2"
+        
+        // Work Manager for background tasks
+        implementation "androidx.work:work-runtime-ktx:2.9.0"
+        
+        // Testing dependencies
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+        
+        // Flutter-specific dependency
+        implementation 'io.flutter:flutter_embedding_debug:1.0.0-c29809135135e262a912cf583b2c90deb9ded610'
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+
+            testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+               outputs.upToDateWhen {false}
+               showStandardStreams = true
+            }
+        }
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        flatDir {
+            dirs project(':flutter_singbox').file('libs')
+        }
+    }
+}
