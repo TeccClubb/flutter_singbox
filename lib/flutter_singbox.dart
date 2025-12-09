@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'flutter_singbox_platform_interface.dart';
 
 /// Main class for the Flutter SingBox VPN plugin.
