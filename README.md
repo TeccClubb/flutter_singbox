@@ -17,10 +17,16 @@ A Flutter plugin for integrating [Sing-Box](https://sing-box.sagernet.org/) VPN 
 
 ## Platform Support
 
-| Platform | Support |
-|----------|---------|
-| Android  | ✅      |
-| iOS      | 🚧 Coming Soon |
+| Platform | Support | Sing-Box Version |
+|----------|---------|------------------|
+| Android  | ✅      | 1.12.12          |
+| iOS      | ❌ Not Supported | - |
+| macOS    | ❌ Not Supported | - |
+| Windows  | ❌ Not Supported | - |
+| Linux    | ❌ Not Supported | - |
+
+> **Need iOS, macOS, or Windows support?**  
+> Contact us at [tecclubx.com](https://tecclubx.com) or email [info@tecclubx.com](mailto:info@tecclubx.com) for custom development.
 
 ## Requirements
 
@@ -435,6 +441,12 @@ android {
 
 ## Changelog
 
+### 1.1.1
+- Fixed app launcher icon being overridden by plugin drawable
+- Added VPN key icon for notification
+- Fixed VPN status incorrectly showing "Started" when config has errors
+- Improved error handling during VPN startup
+
 ### 1.1.0
 - Added log streaming support
 - Added 16KB page size support for Android 15+
@@ -453,6 +465,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Sing-Box](https://sing-box.sagernet.org/) - The universal proxy platform
 - [TecClub](https://tecclubx.com) - Plugin development
+
+## Contact
+
+For support, custom development, or business inquiries:
+
+- 🌐 Website: [tecclubx.com](https://tecclubx.com)
+- 📧 Email: [info@tecclubx.com](mailto:info@tecclubx.com)
 
 ## Contributing
 
