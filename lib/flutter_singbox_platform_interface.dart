@@ -88,4 +88,19 @@ abstract class FlutterSingboxPlatform extends PlatformInterface {
   Future<List<Map<String, dynamic>>> getInstalledApps() {
     throw UnimplementedError('getInstalledApps() has not been implemented.');
   }
+  
+  /// Stream of log messages from the VPN service
+  Stream<Map<String, dynamic>> get onLogMessage {
+    throw UnimplementedError('onLogMessage has not been implemented.');
+  }
+  
+  /// Get buffered log messages
+  Future<List<String>> getLogs() {
+    throw UnimplementedError('getLogs() has not been implemented.');
+  }
+  
+  /// Clear the log buffer
+  Future<bool> clearLogs() {
+    throw UnimplementedError('clearLogs() has not been implemented.');
+  }
 }

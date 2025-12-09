@@ -31,6 +31,9 @@ class ServiceConnection(
     var isBound = false
         private set
     
+    // Flag to track intentional disconnect (suppress callbacks)
+    private var isIntentionalDisconnect = false
+    
     val binder: ServiceBinder?
         get() = service as? ServiceBinder
 
@@ -40,29 +43,12 @@ class ServiceConnection(
     fun connect() {
         android.util.Log.e(TAG, "Connecting to service")
         
-        // First check if the service is actually running using ActivityManager
-        val isServiceRunning = try {
-            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-            val runningServices = runBlocking {
-                withContext(Dispatchers.IO) {
-                    manager.getRunningServices(Integer.MAX_VALUE)
-                }
-            }
-            
-            val isRunning = runningServices.any { 
-                it.service.className.contains("VPNService") 
-            }
-            
-            android.util.Log.e(TAG, "Service running check: $isRunning")
-            isRunning
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error checking if service is running", e)
-            false
-        }
+        // Reset intentional disconnect flag when connecting
+        isIntentionalDisconnect = false
         
-        if (!isServiceRunning) {
-            android.util.Log.e(TAG, "VPN service is not running, setting status to Stopped")
-            callback.onServiceStatusChanged(Status.Stopped)
+        // If already bound, don't reconnect
+        if (isBound) {
+            android.util.Log.e(TAG, "Already bound to service, skipping connect")
             return
         }
         
@@ -73,7 +59,7 @@ class ServiceConnection(
             }
         }
         
-        // Try to determine if the service is already running by checking if binding succeeds
+        // Try to bind to the service - BIND_AUTO_CREATE will create it if needed
         val bound = try {
             context.bindService(intent, this, BIND_AUTO_CREATE)
         } catch (e: Exception) {
@@ -81,28 +67,25 @@ class ServiceConnection(
             false
         }
         
-        // If binding fails, it could mean the service isn't running
-        if (!bound) {
-            android.util.Log.e(TAG, "Failed to bind to service, setting status to Stopped")
-            callback.onServiceStatusChanged(Status.Stopped)
-        }
-        
         android.util.Log.e(TAG, "Connect binding result: $bound")
+        
+        // Don't set status to Stopped here - let the service callbacks handle status
+        // The service will send broadcasts when it actually starts/stops
     }
 
     fun disconnect() {
         android.util.Log.e(TAG, "Disconnecting from service")
         
-        // First update status to avoid race conditions
-        _status = Status.Stopped
+        // Mark as intentional disconnect to suppress callbacks
+        isIntentionalDisconnect = true
         
         // Only try to unbind if we're bound
         if (isBound) {
+            // First update status to Stopping (not Stopped) - will become Stopped after actual disconnect
+            _status = Status.Stopping
+            
             try {
-                // Before unbinding, notify that service is considered stopped
-                android.util.Log.e(TAG, "Unbinding from service, setting status to Stopped")
-                callback.onServiceStatusChanged(Status.Stopped)
-                
+                android.util.Log.e(TAG, "Unbinding from service")
                 // Now unbind
                 context.unbindService(this)
             } catch (e: IllegalArgumentException) {
@@ -110,11 +93,10 @@ class ServiceConnection(
             } finally {
                 // Even if unbinding fails, mark as unbound
                 isBound = false
+                _status = Status.Stopped
             }
         } else {
             android.util.Log.e(TAG, "Not bound to service, nothing to disconnect")
-            // Still notify status change in case UI is waiting for it
-            callback.onServiceStatusChanged(Status.Stopped)
         }
         
         // Clear service reference
@@ -191,15 +173,18 @@ class ServiceConnection(
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
-        android.util.Log.e(TAG, "Service disconnected")
+        android.util.Log.e(TAG, "Service disconnected (intentional=$isIntentionalDisconnect)")
         this.service = null
         this.isBound = false
         
         // Update our local status
         _status = Status.Stopped
         
-        // Notify that service is stopped through the callback
-        callback.onServiceStatusChanged(Status.Stopped)
+        // Only notify callback if this was NOT an intentional disconnect
+        // (intentional disconnects are handled by the caller)
+        if (!isIntentionalDisconnect) {
+            callback.onServiceStatusChanged(Status.Stopped)
+        }
     }
 
     override fun onBindingDied(name: ComponentName?) {

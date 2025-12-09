@@ -409,4 +409,9 @@ class BoxService(
     internal fun writeLog(message: String) {
         commandServer?.writeMessage(message)
     }
+    
+    internal fun sendNotification(notification: io.nekohasekai.libbox.Notification) {
+        // Basic notification handling - can be extended later
+        android.util.Log.d("BoxService", "Notification: ${notification.title} - ${notification.body}")
+    }
 }

@@ -77,6 +77,22 @@ class MockFlutterSingboxPlatform
       'isSystemApp': false,
     },
   ]);
+
+  @override
+  Future<bool> clearLogs() {
+    // TODO: implement clearLogs
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<List<String>> getLogs() {
+    // TODO: implement getLogs
+    throw UnimplementedError();
+  }
+
+  @override
+  // TODO: implement onLogMessage
+  Stream<Map<String, dynamic>> get onLogMessage => throw UnimplementedError();
 }
 
 void main() {

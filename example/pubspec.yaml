@@ -17,6 +17,11 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # provider: ^6.1.5+1
+  http: ^1.5.0
+  # shared_preferences: ^2.5.3
+  google_fonts: ^6.3.2
+  google_nav_bar: ^5.0.7
   flutter_singbox:
     # When depending on this package from a real application you should use:
     #   flutter_singbox: ^x.y.z

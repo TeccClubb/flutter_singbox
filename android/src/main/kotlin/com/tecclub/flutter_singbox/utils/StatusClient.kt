@@ -24,6 +24,12 @@ class StatusClient(
     )
 
     fun connect() {
+        // Don't reconnect if already connected - this prevents race conditions
+        if (commandClient.isConnected()) {
+            android.util.Log.e("StatusClient", "Already connected to status server, skipping connect")
+            return
+        }
+        
         android.util.Log.e("StatusClient", "Connecting to status server")
         scope.launch(Dispatchers.IO) {
             try {

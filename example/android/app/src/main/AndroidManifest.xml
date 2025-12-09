@@ -18,7 +18,10 @@
         android:name="${applicationName}"
         android:label="flutter_singbox_example"
         android:icon="@mipmap/ic_launcher"
-        tools:ignore="MissingApplicationIcon">
+        android:appCategory="productivity"
+        android:extractNativeLibs="false"
+        tools:ignore="MissingApplicationIcon"
+        tools:targetApi="36">
 
         <activity
             android:name=".MainActivity"

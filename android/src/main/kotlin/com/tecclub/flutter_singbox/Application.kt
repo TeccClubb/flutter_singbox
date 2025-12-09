@@ -11,6 +11,7 @@ import androidx.core.content.getSystemService
 import com.tecclub.flutter_singbox.config.SimpleConfigManager
 import go.Seq
 import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.SetupOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -97,7 +98,22 @@ class Application {
             workingDir.mkdirs()
             val tempDir = context.cacheDir
             tempDir.mkdirs()
-            Libbox.setup(baseDir.path, workingDir.path, tempDir.path, false)
+            
+            // Match official app: fixAndroidStack for Android N-N_MR1 and P+
+            // See: https://github.com/golang/go/issues/68760
+            val fixAndroidStack = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && 
+                    android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.N_MR1 ||
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+            
+            val setupOptions = SetupOptions()
+            setupOptions.basePath = baseDir.path
+            setupOptions.workingPath = workingDir.path
+            setupOptions.tempPath = tempDir.path
+            setupOptions.fixAndroidStack = fixAndroidStack
+            
+            android.util.Log.d("Application", "Initializing libbox with fixAndroidStack=$fixAndroidStack")
+            
+            Libbox.setup(setupOptions)
             Libbox.redirectStderr(File(workingDir, "stderr.log").path)
         }
     }

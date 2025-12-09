@@ -18,6 +18,10 @@ fun Iterable<String>.toStringIterator(): StringIterator {
         override fun next(): String {
             return iterator.next()
         }
+        
+        override fun len(): Int {
+            return 0 // Iterator doesn't support len, return 0
+        }
     }
 }
 

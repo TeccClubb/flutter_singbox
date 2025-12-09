@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.FileDescriptor
+import java.net.InetAddress
 
 class VPNService : VpnService(), PlatformInterfaceWrapper {
 
@@ -68,7 +69,9 @@ class VPNService : VpnService(), PlatformInterfaceWrapper {
     }
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        protect(fd)
+        android.util.Log.d("VPNService", "autoDetectInterfaceControl called with fd=$fd")
+        val result = protect(fd)
+        android.util.Log.d("VPNService", "protect($fd) returned $result")
     }
 
     override fun openTun(options: TunOptions): Int {
@@ -95,7 +98,7 @@ class VPNService : VpnService(), PlatformInterfaceWrapper {
         }
 
         if (options.autoRoute) {
-            builder.addDnsServer(options.dnsServerAddress)
+            builder.addDnsServer(options.dnsServerAddress.value)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val inet4RouteAddress = options.inet4RouteAddress
@@ -211,5 +214,9 @@ class VPNService : VpnService(), PlatformInterfaceWrapper {
     
     override fun writeLog(message: String) {
         service.writeLog(message)
+    }
+    
+    override fun sendNotification(notification: io.nekohasekai.libbox.Notification) {
+        service.sendNotification(notification)
     }
 }

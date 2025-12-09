@@ -56,10 +56,16 @@ class _HomePageState extends State<HomePage> {
   int _connectionsIn = 0;
   int _connectionsOut = 0;
 
+  // Logs
+  final List<String> _logs = [];
+  final ScrollController _logScrollController = ScrollController();
+  bool _showLogs = false;
+
   // Using the global singbox instance
   final _flutterSingboxPlugin = singboxPlugin;
   StreamSubscription? _statusSubscription;
   StreamSubscription? _trafficSubscription;
+  StreamSubscription? _logSubscription;
 
   @override
   void initState() {
@@ -71,17 +77,19 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _statusSubscription?.cancel();
     _trafficSubscription?.cancel();
+    _logSubscription?.cancel();
     _configController.dispose();
+    _logScrollController.dispose();
     super.dispose();
   }
 
   // Initialize the plugin and set up listeners
   Future<void> initPlugin() async {
     try {
-      // Get platform version
-      final platformVersion =
-          await _flutterSingboxPlugin.getPlatformVersion() ??
-          'Unknown platform version';
+      // // Get platform version
+      // final platformVersion =
+      //     await _flutterSingboxPlugin.getPlatformVersion() ??
+      //     'Unknown platform version';
 
       // Get current VPN status and log it
       final vpnStatus = await _flutterSingboxPlugin.getVPNStatus();
@@ -117,10 +125,38 @@ class _HomePageState extends State<HomePage> {
         });
       });
 
+      // Listen for log messages
+      _logSubscription = _flutterSingboxPlugin.onLogMessage.listen((event) {
+        log('Log event: $event');
+        if (event['type'] == 'clear') {
+          setState(() {
+            _logs.clear();
+          });
+        } else if (event['type'] == 'log' && event['message'] != null) {
+          setState(() {
+            _logs.add(event['message'] as String);
+            // Keep only last 200 logs
+            while (_logs.length > 200) {
+              _logs.removeAt(0);
+            }
+          });
+          // Auto-scroll to bottom
+          if (_logScrollController.hasClients) {
+            Future.delayed(const Duration(milliseconds: 50), () {
+              _logScrollController.animateTo(
+                _logScrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 100),
+                curve: Curves.easeOut,
+              );
+            });
+          }
+        }
+      });
+
       // Update state with initial values
       if (mounted) {
         setState(() {
-          _platformVersion = platformVersion;
+          _platformVersion = "16";
           _vpnStatus = vpnStatus;
           _configController.text = _formatJson(sampleConfig);
         });
@@ -308,6 +344,108 @@ class _HomePageState extends State<HomePage> {
               ),
             const SizedBox(height: 20),
 
+            // Logs Card - show when VPN is connected or when we have logs
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Service Logs',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                _showLogs
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _showLogs = !_showLogs;
+                                });
+                              },
+                              tooltip: _showLogs ? 'Hide Logs' : 'Show Logs',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete),
+                              onPressed: () async {
+                                await _flutterSingboxPlugin.clearLogs();
+                                setState(() {
+                                  _logs.clear();
+                                });
+                              },
+                              tooltip: 'Clear Logs',
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (_showLogs) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        height: 300,
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: _logs.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No logs yet. Connect VPN to see logs.',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              )
+                            : ListView.builder(
+                                controller: _logScrollController,
+                                padding: const EdgeInsets.all(8),
+                                itemCount: _logs.length,
+                                itemBuilder: (context, index) {
+                                  final log = _logs[index];
+                                  // Color logs based on content
+                                  Color logColor = Colors.white70;
+                                  if (log.contains('error') ||
+                                      log.contains('Error') ||
+                                      log.contains('ERROR')) {
+                                    logColor = Colors.red;
+                                  } else if (log.contains('warn') ||
+                                      log.contains('Warn') ||
+                                      log.contains('WARN')) {
+                                    logColor = Colors.orange;
+                                  } else if (log.contains('info') ||
+                                      log.contains('Info') ||
+                                      log.contains('INFO')) {
+                                    logColor = Colors.lightBlue;
+                                  }
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 1,
+                                    ),
+                                    child: Text(
+                                      log,
+                                      style: TextStyle(
+                                        color: logColor,
+                                        fontFamily: 'monospace',
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
             // Configuration
             Card(
               child: Padding(
@@ -437,10 +575,10 @@ String sampleConfig = '''
   },
   "inbounds": [
     {
-      "inet4_address": "172.19.0.1/30",
-      "inet6_address": "fdfe:dcba:9876::1/126",
+      "address": ["172.19.0.1/30"],
       "auto_route": true,
       "endpoint_independent_nat": false,
+      "interface_name": "sing-tun",
       "mtu": 9000,
       "platform": {
         "http_proxy": {
@@ -466,12 +604,12 @@ String sampleConfig = '''
     {
       "tag": "proxy",
       "type": "selector",
-      "outbounds": ["auto", "vless-0b7630b3", "direct"]
+      "outbounds": ["auto", "Hysteria2", "direct"]
     },
     {
       "tag": "auto",
       "type": "urltest",
-      "outbounds": ["vless-0b7630b3"],
+      "outbounds": ["Hysteria2"],
       "url": "http://www.gstatic.com/generate_204",
       "interval": "10m",
       "tolerance": 50
@@ -485,25 +623,22 @@ String sampleConfig = '''
       "type": "dns"
     },
     {
-      "type": "vless",
-      "tag": "vless-0b7630b3",
-      "server": "singa.tecclubx.com",
-      "server_port": 443,
-      "uuid": "b656cd02-61a3-49ae-8007-74fbbcf8e0cc",
-      "flow": "",
-      "transport": {
-        "path": "/sing-box",
-        "headers": {
-          "Host": "singa.tecclubx.com"
-        },
-        "type": "ws"
-      },
-      "tls": {
-        "enabled": true,
-        "server_name": "singa.tecclubx.com",
-        "insecure": true
-      }
-    }
+            "type": "hysteria2",
+            "tag": "Hysteria2",
+            "server": "hk-4.tecclubx.com",
+            "server_port": 443,
+            "up_mbps": 200,
+            "down_mbps": 1000,
+            "password": "0bd33c77-fb77-4b21-b310-91aec507cc3f",
+            "tls": {
+                "enabled": true,
+                "insecure": false,
+                "server_name": "hk-4.tecclubx.com",
+                "alpn": [
+                    "h3"
+                ]
+            }
+        }
   ],
   "route": {
     "auto_detect_interface": true,

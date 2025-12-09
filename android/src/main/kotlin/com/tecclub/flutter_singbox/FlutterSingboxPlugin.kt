@@ -28,8 +28,10 @@ import com.tecclub.flutter_singbox.constant.ServiceMode
 import com.tecclub.flutter_singbox.constant.TrafficStats
 import go.Seq
 import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.SetupOptions
 import java.io.File
 import com.tecclub.flutter_singbox.utils.StatusClient
+import com.tecclub.flutter_singbox.utils.LogClient
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -135,7 +137,22 @@ class ApplicationHelper {
             workingDir.mkdirs()
             val tempDir = context.cacheDir
             tempDir.mkdirs()
-            Libbox.setup(baseDir.path, workingDir.path, tempDir.path, false)
+            
+            // Match official app: fixAndroidStack for Android N-N_MR1 and P+
+            // See: https://github.com/golang/go/issues/68760
+            val fixAndroidStack = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && 
+                    android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.N_MR1 ||
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+            
+            val setupOptions = SetupOptions()
+            setupOptions.basePath = baseDir.path
+            setupOptions.workingPath = workingDir.path
+            setupOptions.tempPath = tempDir.path
+            setupOptions.fixAndroidStack = fixAndroidStack
+            
+            android.util.Log.d("ApplicationHelper", "Initializing libbox with fixAndroidStack=$fixAndroidStack")
+            
+            Libbox.setup(setupOptions)
             Libbox.redirectStderr(File(workingDir, "stderr.log").path)
         }
     }
@@ -147,6 +164,7 @@ class FlutterSingboxPlugin :
     MethodCallHandler,
     ActivityAware,
     StatusClient.Handler,
+    LogClient.Handler,
     ServiceConnection.Callback,
     PluginRegistry.ActivityResultListener {
 
@@ -156,6 +174,7 @@ class FlutterSingboxPlugin :
     // Event channel for broadcasting status updates to Flutter
     private lateinit var statusEventChannel: EventChannel
     private lateinit var trafficEventChannel: EventChannel
+    private lateinit var logEventChannel: EventChannel
     
     // Context and Activity references
     private lateinit var context: Context
@@ -164,6 +183,7 @@ class FlutterSingboxPlugin :
     // Service connection
     private val connection by lazy { ServiceConnection(context, this, false) }
     private val statusClient by lazy { StatusClient(coroutineScope, this) }
+    private val logClient by lazy { LogClient(coroutineScope, this) }
     private val coroutineScope = CoroutineScope(Dispatchers.Main + Job())
     
     // Status tracking
@@ -172,6 +192,12 @@ class FlutterSingboxPlugin :
     
     // For checking the initial status upon startup
     private var statusInitialized = false
+    
+    // Flag to prevent reconnection during shutdown
+    private var isShuttingDown = false
+    
+    // Flag to prevent Stopped status during startup
+    private var isStarting = false
     
     // Traffic stats
     private var _trafficStats = MutableStateFlow<Map<String, Any>>(
@@ -199,6 +225,11 @@ class FlutterSingboxPlugin :
     // Event sink for status updates
     private var statusEventSink: EventChannel.EventSink? = null
     private var trafficEventSink: EventChannel.EventSink? = null
+    private var logEventSink: EventChannel.EventSink? = null
+    
+    // Log buffer to store recent logs
+    private val logBuffer = java.util.LinkedList<String>()
+    private val maxLogBufferSize = 500
     
     // Periodic status check
     private fun startPeriodicStatusCheck() {
@@ -229,17 +260,44 @@ class FlutterSingboxPlugin :
                 
                 android.util.Log.e("FlutterSingboxPlugin", "Received broadcast status change: ${status.name}")
                 
+                // Skip if we're shutting down and receive Started status
+                if (isShuttingDown && status == Status.Started) {
+                    android.util.Log.e("FlutterSingboxPlugin", "Ignoring broadcast status $status during shutdown")
+                    return
+                }
+                
+                // Skip if we're starting and receive Stopped status (race condition during startup)
+                if (isStarting && status == Status.Stopped) {
+                    android.util.Log.e("FlutterSingboxPlugin", "Ignoring broadcast status $status during startup")
+                    return
+                }
+                
                 // Update the status
                 _vpnStatus.value = status
                 
                 // We've now initialized the status
                 statusInitialized = true
                 
+                // Connect or disconnect clients based on status
+                when (status) {
+                    Status.Started -> {
+                        if (!statusClient.isConnected()) {
+                            statusClient.connect()
+                        }
+                        if (logEventSink != null && !logClient.isConnected()) {
+                            logClient.connect()
+                        }
+                    }
+                    Status.Stopped -> {
+                        // Clients will be disconnected by stopVPN or onServiceStatusChanged
+                    }
+                    else -> {
+                        // Starting/Stopping - no action
+                    }
+                }
+                
                 // Send status update via the helper method
                 sendStatusUpdate(status)
-                
-                // Verify the status with a detailed check
-                checkServiceStatus()
             }
         }
     }
@@ -295,27 +353,36 @@ class FlutterSingboxPlugin :
                 android.util.Log.e("FlutterSingboxPlugin", "Status event channel - onListen called")
                 statusEventSink = events
                 
-                // Always do a fresh status check first, before sending any status
+                // Just send the current status - don't disconnect or cause issues
                 coroutineScope.launch {
-                    // Disconnect from any previous connection
-                    try {
-                        connection.disconnect()
-                        statusClient.disconnect()
-                    } catch (e: Exception) {
-                        android.util.Log.e("FlutterSingboxPlugin", "Error disconnecting before status check", e)
+                    // Check if service is actually running
+                    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    val isServiceRunning = withContext(Dispatchers.IO) {
+                        manager.getRunningServices(Integer.MAX_VALUE).any { 
+                            it.service.className.contains("BoxService") || 
+                            it.service.className.contains("VPNService")
+                        }
                     }
                     
-                    // Force status to Stopped initially
-                    _vpnStatus.value = Status.Stopped
-                    
-                    // Now check real status
-                    checkServiceStatus()
-                    
-                    // After status check, send the current status to Flutter
-                    if (statusEventSink != null) {
-                        android.util.Log.e("FlutterSingboxPlugin", "Sending initial status: ${_vpnStatus.value}")
-                        sendStatusUpdate(_vpnStatus.value)
+                    if (isServiceRunning) {
+                        // Service is running, set status to Started
+                        _vpnStatus.value = Status.Started
+                        
+                        // Connect clients if not already connected
+                        if (!statusClient.isConnected()) {
+                            statusClient.connect()
+                        }
+                        if (logEventSink != null && !logClient.isConnected()) {
+                            logClient.connect()
+                        }
+                    } else {
+                        // Service is not running
+                        _vpnStatus.value = Status.Stopped
                     }
+                    
+                    // Send current status to Flutter
+                    android.util.Log.e("FlutterSingboxPlugin", "Sending initial status: ${_vpnStatus.value}")
+                    sendStatusUpdate(_vpnStatus.value)
                 }
             }
             
@@ -336,6 +403,38 @@ class FlutterSingboxPlugin :
             override fun onCancel(arguments: Any?) {
                 android.util.Log.e("FlutterSingboxPlugin", "Traffic event channel - onCancel called")
                 trafficEventSink = null
+            }
+        })
+        
+        // Setup log event channel
+        logEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "com.tecclub.flutter_singbox/log_events")
+        logEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                android.util.Log.e("FlutterSingboxPlugin", "Log event channel - onListen called")
+                logEventSink = events
+                
+                // Send any buffered logs
+                synchronized(logBuffer) {
+                    if (logBuffer.isNotEmpty()) {
+                        val bufferedLogs = logBuffer.toList()
+                        Handler(Looper.getMainLooper()).post {
+                            bufferedLogs.forEach { log ->
+                                logEventSink?.success(log)
+                            }
+                        }
+                    }
+                }
+                
+                // Connect log client when listener is attached and VPN is running
+                if (_vpnStatus.value == Status.Started && !logClient.isConnected()) {
+                    logClient.connect()
+                }
+            }
+            
+            override fun onCancel(arguments: Any?) {
+                android.util.Log.e("FlutterSingboxPlugin", "Log event channel - onCancel called")
+                logEventSink = null
+                logClient.disconnect()
             }
         })
         
@@ -360,6 +459,7 @@ class FlutterSingboxPlugin :
         // Clear event channel handlers
         statusEventChannel.setStreamHandler(null)
         trafficEventChannel.setStreamHandler(null)
+        logEventChannel.setStreamHandler(null)
         methodChannel.setMethodCallHandler(null)
         
         // Clear event sinks
@@ -412,87 +512,52 @@ class FlutterSingboxPlugin :
     
     private fun checkServiceStatus() {
         android.util.Log.e("FlutterSingboxPlugin", "Checking service status")
+        
+        // Don't check if we're shutting down
+        if (isShuttingDown) {
+            android.util.Log.e("FlutterSingboxPlugin", "Skipping service check - shutting down")
+            return
+        }
+        
         coroutineScope.launch {
             try {
-                // First, check if the VPN service is actually running using more specific class names
+                // Check if the VPN service is actually running
                 val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                val runningServices = withContext(Dispatchers.IO) {
-                    manager.getRunningServices(Integer.MAX_VALUE)
-                }
-                
-                // Look for both potential service class names
-                val isServiceRunning = runningServices.any { 
-                    it.service.className.contains("BoxService") || 
-                    it.service.className.contains("VPNService")
+                val isServiceRunning = withContext(Dispatchers.IO) {
+                    manager.getRunningServices(Integer.MAX_VALUE).any { 
+                        it.service.className.contains("BoxService") || 
+                        it.service.className.contains("VPNService")
+                    }
                 }
                 
                 android.util.Log.e("FlutterSingboxPlugin", "VPN service running check: $isServiceRunning")
                 
-                if (!isServiceRunning) {
-                    // Service is definitely not running, update status to Stopped
-                    android.util.Log.e("FlutterSingboxPlugin", "VPN service is not running, setting status to Stopped")
+                if (isServiceRunning) {
+                    // Service is running, set status to Started
+                    _vpnStatus.value = Status.Started
                     
-                    // Disconnect from service and status client to clean up any stale connections
-                    try {
-                        connection.disconnect()
-                        statusClient.disconnect()
-                    } catch (e: Exception) {
-                        android.util.Log.e("FlutterSingboxPlugin", "Error disconnecting during service check: ${e.message}")
+                    // Connect clients if not already connected
+                    if (!statusClient.isConnected()) {
+                        statusClient.connect()
                     }
-                    
-                    // Update status to Stopped
-                    _vpnStatus.value = Status.Stopped
-                    sendStatusUpdate(Status.Stopped)
-                    
-                    // No need to try connecting if service is not running
-                    return@launch
-                }
-                
-                // If we're already bound, no need to reconnect
-                if (connection.isBound && connection.binder != null) {
-                    android.util.Log.e("FlutterSingboxPlugin", "Already connected to service")
-                    
-                    // Use current status
-                    sendStatusUpdate(_vpnStatus.value)
-                    return@launch
-                }
-                
-                // Not bound or no binder, so disconnect and reconnect
-                android.util.Log.e("FlutterSingboxPlugin", "Not properly connected, reconnecting")
-                
-                // Always ensure we disconnect before connecting to get a fresh connection
-                try {
-                    connection.disconnect()
-                    statusClient.disconnect()
-                } catch (e: Exception) {
-                    android.util.Log.e("FlutterSingboxPlugin", "Error disconnecting: ${e.message}")
-                }
-                
-                // Connect to service
-                android.util.Log.e("FlutterSingboxPlugin", "Connecting to service")
-                connection.connect()
-                statusClient.connect()
-                
-                // Wait a moment to get status
-                kotlinx.coroutines.delay(500)
-                
-                // Check if we successfully connected
-                if (connection.isBound) {
-                    android.util.Log.e("FlutterSingboxPlugin", "Connected to service successfully")
-                    // We'll get the status through the onServiceStatusChanged callback
+                    if (logEventSink != null && !logClient.isConnected()) {
+                        logClient.connect()
+                    }
                 } else {
-                    android.util.Log.e("FlutterSingboxPlugin", "Failed to connect, assuming Stopped")
+                    // Service is not running
                     _vpnStatus.value = Status.Stopped
+                    
+                    // Disconnect clients to clean up any stale connections
+                    statusClient.disconnect()
+                    logClient.disconnect()
                 }
                 
-                android.util.Log.e("FlutterSingboxPlugin", "Service status check completed, current status: ${_vpnStatus.value}")
-                
-                // After connecting, broadcast the current status to Flutter
+                // Send status update to Flutter
                 sendStatusUpdate(_vpnStatus.value)
+                statusInitialized = true
+                
             } catch (e: Exception) {
                 android.util.Log.e("FlutterSingboxPlugin", "Error checking service status: ${e.message}")
-                _vpnStatus.value = Status.Stopped
-                sendStatusUpdate(Status.Stopped)
             }
         }
     }
@@ -550,6 +615,12 @@ class FlutterSingboxPlugin :
             "getInstalledApps" -> {
                 getInstalledApps(result)
             }
+            "getLogs" -> {
+                getLogs(result)
+            }
+            "clearLogs" -> {
+                clearLogBuffer(result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -591,6 +662,8 @@ class FlutterSingboxPlugin :
     
     private fun startVPN(result: Result) {
         android.util.Log.e("FlutterSingboxPlugin", "Starting VPN...")
+        // Reset shutdown flag when starting a new connection
+        isShuttingDown = false
         activity?.let {
             val intent = VpnService.prepare(it)
             if (intent != null) {
@@ -609,10 +682,14 @@ class FlutterSingboxPlugin :
     
     private fun startVPNService(result: Result) {
         android.util.Log.e("FlutterSingboxPlugin", "Starting VPN Service...")
+        // Reset shutdown flag and set starting flag
+        isShuttingDown = false
+        isStarting = true
         try {
             // Update status to Starting
             _vpnStatus.value = Status.Starting
             android.util.Log.e("FlutterSingboxPlugin", "Set VPN status to Starting")
+            sendStatusUpdate(Status.Starting)
             
             // Reset session traffic counters
             sessionStartUplinkTotal = 0
@@ -622,14 +699,26 @@ class FlutterSingboxPlugin :
             android.util.Log.e("FlutterSingboxPlugin", "Calling startService method")
             startService(result)
             
-            // Connect to the service
-            android.util.Log.e("FlutterSingboxPlugin", "Connecting to service")
-            connection.connect()
+            // Delay before connecting to service to give it time to start
+            coroutineScope.launch {
+                android.util.Log.e("FlutterSingboxPlugin", "Waiting for service to initialize...")
+                kotlinx.coroutines.delay(1500) // Wait 1.5 seconds for service to start
+                
+                // Connect to the service
+                android.util.Log.e("FlutterSingboxPlugin", "Connecting to service after delay")
+                connection.connect()
+                
+                // Reset starting flag after connection attempt
+                kotlinx.coroutines.delay(500) // Additional delay for connection to stabilize
+                isStarting = false
+                android.util.Log.e("FlutterSingboxPlugin", "Starting phase complete")
+            }
             
             android.util.Log.e("FlutterSingboxPlugin", "VPN service start successful")
             result.success(true)
         } catch (e: Exception) {
             android.util.Log.e("FlutterSingboxPlugin", "Error starting VPN service: ${e.message}", e)
+            isStarting = false
             _vpnStatus.value = Status.Stopped
             result.error("START_VPN_ERROR", e.message, null)
         }
@@ -701,6 +790,10 @@ class FlutterSingboxPlugin :
         try {
             android.util.Log.e("FlutterSingboxPlugin", "Stopping VPN")
             
+            // Set shutting down flag and clear starting flag
+            isShuttingDown = true
+            isStarting = false
+            
             // Update status to Stopping
             _vpnStatus.value = Status.Stopping
             
@@ -708,6 +801,9 @@ class FlutterSingboxPlugin :
             sendStatusUpdate(Status.Stopping)
             
             // Send broadcast to stop the service
+            // NOTE: Do NOT disconnect immediately - let the service complete its cleanup first
+            // The broadcast receiver will handle status updates, and we'll disconnect after
+            // the service is confirmed stopped
             android.util.Log.e("FlutterSingboxPlugin", "Sending SERVICE_CLOSE broadcast")
             context.sendBroadcast(
                 Intent(Action.SERVICE_CLOSE).setPackage(
@@ -715,28 +811,40 @@ class FlutterSingboxPlugin :
                 )
             )
             
-            // Disconnect from service
-            android.util.Log.e("FlutterSingboxPlugin", "Disconnecting from service")
-            connection.disconnect()
-            statusClient.disconnect()
-            
-            // After a brief delay, update to Stopped if not already updated by the receiver
+            // Wait for service to stop before disconnecting
+            // The service will broadcast Status.Stopped when it's done cleaning up
             coroutineScope.launch {
-                android.util.Log.e("FlutterSingboxPlugin", "Setting final status to Stopped after delay")
-                kotlinx.coroutines.delay(1500) // Wait 1.5 seconds
+                android.util.Log.e("FlutterSingboxPlugin", "Waiting for service to stop...")
+                
+                // Wait for the service to finish cleanup (it sends Status.Stopped broadcast)
+                kotlinx.coroutines.delay(2000) // Wait 2 seconds for service cleanup
+                
+                // Now it's safe to disconnect since the service has cleaned up
+                android.util.Log.e("FlutterSingboxPlugin", "Disconnecting from service after cleanup")
+                try {
+                    statusClient.disconnect()
+                    logClient.disconnect()
+                    connection.disconnect()
+                } catch (e: Exception) {
+                    android.util.Log.e("FlutterSingboxPlugin", "Error disconnecting: ${e.message}")
+                }
                 
                 // Force status to Stopped regardless of current state
                 _vpnStatus.value = Status.Stopped
                 sendStatusUpdate(Status.Stopped)
                 
-                // Schedule one more check after additional delay to ensure status is correct
-                kotlinx.coroutines.delay(1000) // Wait another second
-                checkServiceStatus()
+                // Reset the shutting down flag
+                isShuttingDown = false
+                
+                android.util.Log.e("FlutterSingboxPlugin", "VPN stopped successfully")
             }
             
             result.success(true)
         } catch (e: Exception) {
             android.util.Log.e("FlutterSingboxPlugin", "Error stopping VPN", e)
+            
+            // Reset the shutting down flag
+            isShuttingDown = false
             
             // Even on error, set status to Stopped for UI consistency
             _vpnStatus.value = Status.Stopped
@@ -747,7 +855,7 @@ class FlutterSingboxPlugin :
     }
     
     private fun getVPNStatus(result: Result) {
-        android.util.Log.e("FlutterSingboxPlugin", "getVPNStatus called, refreshing status")
+        android.util.Log.e("FlutterSingboxPlugin", "getVPNStatus called")
         
         coroutineScope.launch {
             try {
@@ -762,22 +870,29 @@ class FlutterSingboxPlugin :
                 
                 android.util.Log.e("FlutterSingboxPlugin", "VPN service running check in getVPNStatus: $isServiceRunning")
                 
-                if (!isServiceRunning) {
-                    // Service is definitely not running
+                if (isServiceRunning) {
+                    // Service is running, update status to Started
+                    _vpnStatus.value = Status.Started
+                    
+                    // Ensure clients are connected
+                    if (!statusClient.isConnected()) {
+                        statusClient.connect()
+                    }
+                    if (logEventSink != null && !logClient.isConnected()) {
+                        logClient.connect()
+                    }
+                } else {
+                    // Service is not running
                     _vpnStatus.value = Status.Stopped
-                    android.util.Log.e("FlutterSingboxPlugin", "Setting status to Stopped because service is not running")
                 }
                 
-                // Return the current status (which may have just been updated)
+                // Return the current status
                 result.success(_vpnStatus.value.name)
                 
                 // Also update status via event channel
                 sendStatusUpdate(_vpnStatus.value)
                 
-                // Do a complete status check in the background
                 statusInitialized = true
-                checkServiceStatus()
-                
             } catch (e: Exception) {
                 android.util.Log.e("FlutterSingboxPlugin", "Error checking VPN status", e)
                 result.success(_vpnStatus.value.name) // Return current status as fallback
@@ -814,75 +929,74 @@ class FlutterSingboxPlugin :
     override fun onServiceStatusChanged(status: Status) {
         android.util.Log.e("FlutterSingboxPlugin", "onServiceStatusChanged: ${status.name}")
         
-        // Verify actual service state to avoid false "running" status
-        if (status != Status.Stopped) {
-            // Double-check that service is actually running
-            coroutineScope.launch {
-                val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                val isServiceRunning = withContext(Dispatchers.IO) {
-                    manager.getRunningServices(Integer.MAX_VALUE).any { 
-                        it.service.className.contains("BoxService") || 
-                        it.service.className.contains("VPNService")
-                    }
-                }
-                
-                if (!isServiceRunning && status != Status.Stopping) {
-                    android.util.Log.e("FlutterSingboxPlugin", 
-                        "WARNING: Service reported status ${status.name} but service is not actually running. Forcing Stopped status.")
-                    _vpnStatus.value = Status.Stopped
-                    sendStatusUpdate(Status.Stopped)
-                    
-                    statusClient.disconnect()
-                    return@launch
-                }
-                
-                // Service is actually running, so update the status
-                _vpnStatus.value = status
-                sendStatusUpdate(status)
-            }
-        } else {
-            // If status is already Stopped, accept it immediately
-            _vpnStatus.value = status
-            sendStatusUpdate(status)
+        // Skip if we're shutting down and receive Started status
+        if (isShuttingDown && status == Status.Started) {
+            android.util.Log.e("FlutterSingboxPlugin", "Ignoring status $status during shutdown")
+            return
         }
         
+        // Skip if we're starting and receive Stopped status (race condition during startup)
+        if (isStarting && status == Status.Stopped) {
+            android.util.Log.e("FlutterSingboxPlugin", "Ignoring status $status during startup")
+            return
+        }
+        
+        // Update the status immediately
+        _vpnStatus.value = status
+        
         // Connect or disconnect status client based on connection state
-        if (status == Status.Started) {
-            android.util.Log.e("FlutterSingboxPlugin", "Service started, connecting status client")
-            statusClient.connect()
-            
-            // Reset session traffic counters when connection starts
-            sessionStartUplinkTotal = 0
-            sessionStartDownlinkTotal = 0
-        } else if (status == Status.Stopped) {
-            android.util.Log.e("FlutterSingboxPlugin", "Service stopped, disconnecting status client")
-            statusClient.disconnect()
-            
-            // Reset traffic stats when stopped
-            _trafficStats.value = mapOf<String, Any>(
-                "uplinkSpeed" to 0L,
-                "downlinkSpeed" to 0L,
-                "uplinkTotal" to 0L,
-                "downlinkTotal" to 0L,
-                "connectionsIn" to 0,
-                "connectionsOut" to 0,
-                "sessionUplink" to 0L,
-                "sessionDownlink" to 0L,
-                "sessionTotal" to 0L,
-                "formattedUplinkSpeed" to "0 B/s",
-                "formattedDownlinkSpeed" to "0 B/s",
-                "formattedUplinkTotal" to "0 B",
-                "formattedDownlinkTotal" to "0 B",
-                "formattedSessionUplink" to "0 B",
-                "formattedSessionDownlink" to "0 B",
-                "formattedSessionTotal" to "0 B"
-            )
+        when (status) {
+            Status.Started -> {
+                android.util.Log.e("FlutterSingboxPlugin", "Service started, connecting status client")
+                
+                // Connect status client if not already connected
+                if (!statusClient.isConnected()) {
+                    statusClient.connect()
+                }
+                
+                // Also connect log client if there's a listener and not already connected
+                if (logEventSink != null && !logClient.isConnected()) {
+                    logClient.connect()
+                }
+                
+                // Reset session traffic counters when connection starts
+                sessionStartUplinkTotal = 0
+                sessionStartDownlinkTotal = 0
+            }
+            Status.Stopped -> {
+                android.util.Log.e("FlutterSingboxPlugin", "Service stopped, disconnecting status client")
+                statusClient.disconnect()
+                logClient.disconnect()
+                
+                // Reset traffic stats when stopped
+                _trafficStats.value = mapOf<String, Any>(
+                    "uplinkSpeed" to 0L,
+                    "downlinkSpeed" to 0L,
+                    "uplinkTotal" to 0L,
+                    "downlinkTotal" to 0L,
+                    "connectionsIn" to 0,
+                    "connectionsOut" to 0,
+                    "sessionUplink" to 0L,
+                    "sessionDownlink" to 0L,
+                    "sessionTotal" to 0L,
+                    "formattedUplinkSpeed" to "0 B/s",
+                    "formattedDownlinkSpeed" to "0 B/s",
+                    "formattedUplinkTotal" to "0 B",
+                    "formattedDownlinkTotal" to "0 B",
+                    "formattedSessionUplink" to "0 B",
+                    "formattedSessionDownlink" to "0 B",
+                    "formattedSessionTotal" to "0 B"
+                )
+            }
+            else -> {
+                // Starting or Stopping - no action needed
+            }
         }
         
         // We've now initialized the status
         statusInitialized = true
         
-        // Send status update via the helper method
+        // Send status update via the helper method (only once)
         sendStatusUpdate(status)
     }
     
@@ -1005,5 +1119,54 @@ class FlutterSingboxPlugin :
                 }
             }
         }
+    }
+    
+    // LogClient.Handler implementation
+    override fun onConnected() {
+        android.util.Log.d("FlutterSingboxPlugin", "Log client connected")
+    }
+    
+    override fun onDisconnected() {
+        android.util.Log.d("FlutterSingboxPlugin", "Log client disconnected")
+    }
+    
+    override fun clearLogs() {
+        android.util.Log.d("FlutterSingboxPlugin", "Clearing logs")
+        synchronized(logBuffer) {
+            logBuffer.clear()
+        }
+        Handler(Looper.getMainLooper()).post {
+            logEventSink?.success(mapOf("type" to "clear"))
+        }
+    }
+    
+    override fun appendLog(message: String) {
+        // Add to buffer
+        synchronized(logBuffer) {
+            logBuffer.add(message)
+            while (logBuffer.size > maxLogBufferSize) {
+                logBuffer.removeFirst()
+            }
+        }
+        
+        // Send to Flutter
+        Handler(Looper.getMainLooper()).post {
+            logEventSink?.success(mapOf("type" to "log", "message" to message))
+        }
+    }
+    
+    // Method to get buffered logs (can be called from Flutter)
+    private fun getLogs(result: Result) {
+        synchronized(logBuffer) {
+            result.success(logBuffer.toList())
+        }
+    }
+    
+    // Method to clear log buffer
+    private fun clearLogBuffer(result: Result) {
+        synchronized(logBuffer) {
+            logBuffer.clear()
+        }
+        result.success(true)
     }
 }

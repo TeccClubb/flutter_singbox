@@ -85,7 +85,7 @@ class _PerAppTunnelingPageState extends State<PerAppTunnelingPage> {
 
   Future<void> _saveSettings() async {
     try {
-      await widget.singbox.setPerAppProxyMode(_proxyMode);
+      await widget.singbox.setPerAppProxyMode(ProxyMode.EXCLUDE);
       await widget.singbox.setPerAppProxyList(_selectedApps);
 
       ScaffoldMessenger.of(

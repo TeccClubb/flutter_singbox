@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "Flutter (lib/main.dart)",
+            "type": "dart",
+            "request": "launch",
+            "cwd": "example",
+            "program": "lib/main.dart"
+        },
+        {
+            "name": "Flutter (lib/main.dart)",
+            "type": "dart",
+            "request": "launch",
+            "cwd": "example",
+            "program": "lib/main.dart"
+        }
+    ]
+}

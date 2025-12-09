@@ -43,53 +43,93 @@ open class CommandClient(
 
     private var commandClient: LibboxCommandClient? = null
     private val clientHandler = ClientHandler()
+    private val lock = Object()
+    @Volatile private var isConnecting = false
+    
     fun connect() {
-        disconnect()
+        synchronized(lock) {
+            // If already connecting or connected, don't try again
+            if (isConnecting || commandClient != null) {
+                return
+            }
+            isConnecting = true
+        }
+        
+        // Disconnect any existing client first
+        disconnectInternal()
+        
         val options = CommandClientOptions()
         options.command = when (connectionType) {
             ConnectionType.Status -> Libbox.CommandStatus
             ConnectionType.Groups -> Libbox.CommandGroup
             ConnectionType.Log -> Libbox.CommandLog
             ConnectionType.ClashMode -> Libbox.CommandClashMode
-            ConnectionType.GroupOnly -> Libbox.CommandGroupInfoOnly
+            ConnectionType.GroupOnly -> Libbox.CommandGroup
         }
         options.statusInterval = 2 * 1000 * 1000 * 1000
-        val commandClient = CommandClient(clientHandler, options)
+        val newCommandClient = CommandClient(clientHandler, options)
         scope.launch(Dispatchers.IO) {
-            for (i in 1..10) {
-                delay(100 + i.toLong() * 50)
-                try {
-                    commandClient.connect()
-                } catch (ignored: Exception) {
-                    continue
-                }
-                if (!isActive) {
-                    runCatching {
-                        commandClient.disconnect()
+            try {
+                for (i in 1..10) {
+                    delay(100 + i.toLong() * 50)
+                    try {
+                        newCommandClient.connect()
+                    } catch (ignored: Exception) {
+                        continue
+                    }
+                    if (!isActive) {
+                        runCatching {
+                            newCommandClient.disconnect()
+                        }
+                        synchronized(lock) {
+                            isConnecting = false
+                        }
+                        return@launch
+                    }
+                    synchronized(lock) {
+                        this@CommandClient.commandClient = newCommandClient
+                        isConnecting = false
                     }
                     return@launch
                 }
-                this@CommandClient.commandClient = commandClient
-                return@launch
+                runCatching {
+                    newCommandClient.disconnect()
+                }
+            } finally {
+                synchronized(lock) {
+                    isConnecting = false
+                }
+            }
+        }
+    }
+    
+    private fun disconnectInternal() {
+        val client = synchronized(lock) {
+            val c = commandClient
+            commandClient = null
+            c
+        }
+        client?.apply {
+            runCatching {
+                disconnect()
             }
             runCatching {
-                commandClient.disconnect()
+                Seq.destroyRef(refnum)
             }
         }
     }
 
     fun disconnect() {
-        commandClient?.apply {
-            runCatching {
-                disconnect()
-            }
-            Seq.destroyRef(refnum)
+        synchronized(lock) {
+            isConnecting = false
         }
-        commandClient = null
+        disconnectInternal()
     }
     
     fun isConnected(): Boolean {
-        return commandClient != null
+        synchronized(lock) {
+            return commandClient != null && !isConnecting
+        }
     }
 
     private inner class ClientHandler : CommandClientHandler {
@@ -113,15 +153,18 @@ open class CommandClient(
             handler.updateGroups(groups)
         }
 
-        override fun clearLog() {
+        override fun clearLogs() {
             handler.clearLog()
         }
 
-        override fun writeLog(message: String?) {
-            if (message == null) {
+        override fun writeLogs(messageList: io.nekohasekai.libbox.StringIterator?) {
+            if (messageList == null) {
                 return
             }
-            handler.appendLog(message)
+            while (messageList.hasNext()) {
+                val message = messageList.next()
+                handler.appendLog(message)
+            }
         }
 
         override fun writeStatus(message: StatusMessage?) {
@@ -137,6 +180,10 @@ open class CommandClient(
 
         override fun updateClashMode(newMode: String) {
             handler.updateClashMode(newMode)
+        }
+        
+        override fun writeConnections(message: io.nekohasekai.libbox.Connections?) {
+            // Handle connection updates if needed
         }
 
     }
