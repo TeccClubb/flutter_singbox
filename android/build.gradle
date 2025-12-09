@@ -89,9 +89,6 @@ android {
         // Testing dependencies
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
-        
-        // Flutter-specific dependency
-        implementation 'io.flutter:flutter_embedding_debug:1.0.0-c29809135135e262a912cf583b2c90deb9ded610'
     }
 
     testOptions {

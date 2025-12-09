@@ -1,3 +1,11 @@
+## 1.1.1
+
+* Fixed app launcher icon being overridden by plugin drawable
+* Added VPN key icon for notification
+* Fixed VPN status incorrectly showing "Started" when config has errors
+* Improved error handling during VPN startup
+* Renamed internal drawable resources to avoid conflicts
+
 ## 1.1.0
 
 * Added log streaming support with `onLogMessage` stream

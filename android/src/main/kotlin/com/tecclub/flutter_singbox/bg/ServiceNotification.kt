@@ -9,7 +9,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.tecclub.flutter_singbox.R
-// import com.tecclub.flutter_singbox.SimplifiedMainActivity - Remove this import for the plugin
+import com.tecclub.flutter_singbox.config.SimpleConfigManager
 import com.tecclub.flutter_singbox.constant.Status
 import androidx.lifecycle.MutableLiveData
 
@@ -18,12 +18,19 @@ class ServiceNotification(
     private val service: Service
 ) {
     companion object {
-        private const val CHANNEL_ID = "singbox_channel"
+        private const val CHANNEL_ID = "tecclub_singbox_channel"
         private const val NOTIFICATION_ID = 1
     }
 
     private lateinit var notificationBuilder: NotificationCompat.Builder
     private var pendingIntent: PendingIntent? = null
+    
+    // Get title and description from config manager
+    private val notificationTitle: String
+        get() = SimpleConfigManager.getNotificationTitle()
+    
+    private val notificationDescription: String
+        get() = SimpleConfigManager.getNotificationDescription()
 
     init {
         try {
@@ -39,12 +46,12 @@ class ServiceNotification(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             
-            // Create a basic builder with reliable system icons
-            android.util.Log.e("ServiceNotification", "Creating notification builder")
+            // Create a basic builder with VPN key icon
+            android.util.Log.e("ServiceNotification", "Creating notification builder with title: $notificationTitle")
             notificationBuilder = NotificationCompat.Builder(service, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info) // Use system icon to avoid resource errors
-                .setContentTitle("SingBox VPN")
-                .setContentText("Running")
+                .setSmallIcon(R.drawable.ic_vpn_key) // Use VPN key icon
+                .setContentTitle(notificationTitle)
+                .setContentText(notificationDescription)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 .setOngoing(true)
@@ -60,9 +67,9 @@ class ServiceNotification(
             
             // Create an absolutely minimal builder to prevent crashes
             notificationBuilder = NotificationCompat.Builder(service, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("SingBox VPN")
-                .setContentText("Running")
+                .setSmallIcon(R.drawable.ic_vpn_key)
+                .setContentTitle(notificationTitle)
+                .setContentText(notificationDescription)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         }
     }
@@ -71,10 +78,10 @@ class ServiceNotification(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "SingBox VPN",
+                notificationTitle,
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "SingBox VPN service notification"
+                description = "$notificationTitle service notification"
                 setShowBadge(false)
             }
             
@@ -85,9 +92,13 @@ class ServiceNotification(
     }
     
     fun show(profileName: String, details: String) {
+        // Use custom title and description if available
+        val title = notificationTitle
+        val desc = if (details.isNotEmpty()) details else notificationDescription
+        
         val notification = notificationBuilder
-            .setContentTitle("SingBox VPN - $profileName")
-            .setContentText(details)
+            .setContentTitle(title)
+            .setContentText(desc)
             .build()
             
         service.startForeground(NOTIFICATION_ID, notification)

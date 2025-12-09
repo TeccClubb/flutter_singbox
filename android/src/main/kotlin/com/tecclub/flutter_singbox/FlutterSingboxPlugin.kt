@@ -199,6 +199,12 @@ class FlutterSingboxPlugin :
     // Flag to prevent Stopped status during startup
     private var isStarting = false
     
+    // Flag to track if there was a startup error
+    private var hasStartupError = false
+    
+    // Job for stop cleanup - can be cancelled when starting new connection
+    private var stopCleanupJob: kotlinx.coroutines.Job? = null
+    
     // Traffic stats
     private var _trafficStats = MutableStateFlow<Map<String, Any>>(
         mapOf(
@@ -258,7 +264,7 @@ class FlutterSingboxPlugin :
                 val statusOrdinal = intent.getIntExtra(Action.EXTRA_STATUS, Status.Stopped.ordinal)
                 val status = Status.values()[statusOrdinal]
                 
-                android.util.Log.e("FlutterSingboxPlugin", "Received broadcast status change: ${status.name}")
+                android.util.Log.e("FlutterSingboxPlugin", "Received broadcast status change: ${status.name}, isStarting=$isStarting, hasStartupError=$hasStartupError")
                 
                 // Skip if we're shutting down and receive Started status
                 if (isShuttingDown && status == Status.Started) {
@@ -266,10 +272,13 @@ class FlutterSingboxPlugin :
                     return
                 }
                 
-                // Skip if we're starting and receive Stopped status (race condition during startup)
+                // If we receive Stopped during startup, mark it as a startup error
+                // This handles the case where the alert broadcast hasn't been processed yet
                 if (isStarting && status == Status.Stopped) {
-                    android.util.Log.e("FlutterSingboxPlugin", "Ignoring broadcast status $status during startup")
-                    return
+                    android.util.Log.e("FlutterSingboxPlugin", "Received Stopped during startup - marking as startup error")
+                    hasStartupError = true
+                    isStarting = false
+                    // Don't return - let the status update flow through
                 }
                 
                 // Update the status
@@ -309,6 +318,13 @@ class FlutterSingboxPlugin :
                 val alertOrdinal = intent.getIntExtra(Action.EXTRA_ALERT, -1)
                 val message = intent.getStringExtra(Action.EXTRA_ALERT_MESSAGE)
                 
+                // Mark that we had a startup error - this prevents ignoring the Stopped status
+                hasStartupError = true
+                isStarting = false
+                
+                // Update status to Stopped since there was an error
+                _vpnStatus.value = Status.Stopped
+                
                 val alertMessage = if (alertOrdinal >= 0 && alertOrdinal < Alert.values().size) {
                     when (Alert.values()[alertOrdinal]) {
                         Alert.EmptyConfiguration -> "Empty configuration"
@@ -323,6 +339,7 @@ class FlutterSingboxPlugin :
                 
                 // Send alert to Flutter
                 val alertMap = mapOf(
+                    "type" to "alert",
                     "alert" to alertOrdinal,
                     "message" to alertMessage
                 )
@@ -330,6 +347,8 @@ class FlutterSingboxPlugin :
                 val handler = Handler(Looper.getMainLooper())
                 handler.post {
                     statusEventSink?.success(alertMap)
+                    // Also send the Stopped status update
+                    sendStatusUpdate(Status.Stopped)
                 }
             }
         }
@@ -621,9 +640,59 @@ class FlutterSingboxPlugin :
             "clearLogs" -> {
                 clearLogBuffer(result)
             }
+            "setNotificationTitle" -> {
+                val title = call.argument<String>("title") ?: "VPN Service"
+                setNotificationTitle(title, result)
+            }
+            "setNotificationDescription" -> {
+                val description = call.argument<String>("description") ?: "Connected"
+                setNotificationDescription(description, result)
+            }
+            "getNotificationTitle" -> {
+                getNotificationTitle(result)
+            }
+            "getNotificationDescription" -> {
+                getNotificationDescription(result)
+            }
             else -> {
                 result.notImplemented()
             }
+        }
+    }
+    
+    private fun setNotificationTitle(title: String, result: Result) {
+        try {
+            SimpleConfigManager.setNotificationTitle(title)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_ERROR", e.message, null)
+        }
+    }
+    
+    private fun setNotificationDescription(description: String, result: Result) {
+        try {
+            SimpleConfigManager.setNotificationDescription(description)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_ERROR", e.message, null)
+        }
+    }
+    
+    private fun getNotificationTitle(result: Result) {
+        try {
+            val title = SimpleConfigManager.getNotificationTitle()
+            result.success(title)
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_ERROR", e.message, null)
+        }
+    }
+    
+    private fun getNotificationDescription(result: Result) {
+        try {
+            val description = SimpleConfigManager.getNotificationDescription()
+            result.success(description)
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_ERROR", e.message, null)
         }
     }
     
@@ -682,9 +751,16 @@ class FlutterSingboxPlugin :
     
     private fun startVPNService(result: Result) {
         android.util.Log.e("FlutterSingboxPlugin", "Starting VPN Service...")
+        
+        // Cancel any pending stop cleanup job from previous stopVPN call
+        stopCleanupJob?.cancel()
+        stopCleanupJob = null
+        android.util.Log.e("FlutterSingboxPlugin", "Cancelled any pending stop cleanup job")
+        
         // Reset shutdown flag and set starting flag
         isShuttingDown = false
         isStarting = true
+        hasStartupError = false
         try {
             // Update status to Starting
             _vpnStatus.value = Status.Starting
@@ -703,6 +779,13 @@ class FlutterSingboxPlugin :
             coroutineScope.launch {
                 android.util.Log.e("FlutterSingboxPlugin", "Waiting for service to initialize...")
                 kotlinx.coroutines.delay(1500) // Wait 1.5 seconds for service to start
+                
+                // Check if there was a startup error
+                if (hasStartupError) {
+                    android.util.Log.e("FlutterSingboxPlugin", "Startup error detected, not connecting to service")
+                    isStarting = false
+                    return@launch
+                }
                 
                 // Connect to the service
                 android.util.Log.e("FlutterSingboxPlugin", "Connecting to service after delay")
@@ -813,11 +896,18 @@ class FlutterSingboxPlugin :
             
             // Wait for service to stop before disconnecting
             // The service will broadcast Status.Stopped when it's done cleaning up
-            coroutineScope.launch {
+            // Store the job so it can be cancelled if user starts VPN again quickly
+            stopCleanupJob = coroutineScope.launch {
                 android.util.Log.e("FlutterSingboxPlugin", "Waiting for service to stop...")
                 
                 // Wait for the service to finish cleanup (it sends Status.Stopped broadcast)
                 kotlinx.coroutines.delay(2000) // Wait 2 seconds for service cleanup
+                
+                // Check if we're still shutting down (might have been cancelled by startVPN)
+                if (!isShuttingDown) {
+                    android.util.Log.e("FlutterSingboxPlugin", "Stop cleanup cancelled - VPN is starting again")
+                    return@launch
+                }
                 
                 // Now it's safe to disconnect since the service has cleaned up
                 android.util.Log.e("FlutterSingboxPlugin", "Disconnecting from service after cleanup")
@@ -835,6 +925,7 @@ class FlutterSingboxPlugin :
                 
                 // Reset the shutting down flag
                 isShuttingDown = false
+                stopCleanupJob = null
                 
                 android.util.Log.e("FlutterSingboxPlugin", "VPN stopped successfully")
             }
@@ -927,7 +1018,7 @@ class FlutterSingboxPlugin :
     
     // ServiceConnection.Callback implementation
     override fun onServiceStatusChanged(status: Status) {
-        android.util.Log.e("FlutterSingboxPlugin", "onServiceStatusChanged: ${status.name}")
+        android.util.Log.e("FlutterSingboxPlugin", "onServiceStatusChanged: ${status.name}, hasStartupError=$hasStartupError")
         
         // Skip if we're shutting down and receive Started status
         if (isShuttingDown && status == Status.Started) {
@@ -935,10 +1026,19 @@ class FlutterSingboxPlugin :
             return
         }
         
-        // Skip if we're starting and receive Stopped status (race condition during startup)
-        if (isStarting && status == Status.Stopped) {
-            android.util.Log.e("FlutterSingboxPlugin", "Ignoring status $status during startup")
+        // Skip if there was a startup error and we receive Started status
+        // This prevents reporting Started when the service actually failed
+        if (hasStartupError && status == Status.Started) {
+            android.util.Log.e("FlutterSingboxPlugin", "Ignoring status $status because hasStartupError=true")
             return
+        }
+        
+        // If we receive Stopped during startup, mark it as a startup error
+        if (isStarting && status == Status.Stopped) {
+            android.util.Log.e("FlutterSingboxPlugin", "Received Stopped during startup - marking as startup error")
+            hasStartupError = true
+            isStarting = false
+            // Don't return - let the status update flow through
         }
         
         // Update the status immediately

@@ -10,7 +10,11 @@ object SimpleConfigManager {
     private const val KEY_CONFIG = "config_json"
     private const val KEY_AUTO_START = "auto_start"
     private const val KEY_STARTED_BY_USER = "started_by_user"
+    private const val KEY_NOTIFICATION_TITLE = "notification_title"
+    private const val KEY_NOTIFICATION_DESCRIPTION = "notification_description"
     private const val DEFAULT_CONFIG = "{}"
+    private const val DEFAULT_NOTIFICATION_TITLE = "VPN Service"
+    private const val DEFAULT_NOTIFICATION_DESCRIPTION = "Connected"
     
     // Initialize the config manager with context
     fun init(context: Context) {
@@ -89,8 +93,68 @@ object SimpleConfigManager {
     
     // Get auto-start setting
     fun getAutoStart(): Boolean {
-        val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        return prefs.getBoolean(KEY_AUTO_START, false)
+        return try {
+            val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getBoolean(KEY_AUTO_START, false)
+        } catch (e: UninitializedPropertyAccessException) {
+            Log.w(TAG, "Application not initialized, cannot get auto-start setting")
+            false
+        }
+    }
+    
+    // Set notification title
+    fun setNotificationTitle(title: String) {
+        try {
+            val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putString(KEY_NOTIFICATION_TITLE, title).apply()
+            Log.d(TAG, "Notification title set to: $title")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save notification title", e)
+        }
+    }
+    
+    // Get notification title
+    fun getNotificationTitle(): String {
+        return try {
+            val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_NOTIFICATION_TITLE, DEFAULT_NOTIFICATION_TITLE) ?: DEFAULT_NOTIFICATION_TITLE
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get notification title", e)
+            DEFAULT_NOTIFICATION_TITLE
+        }
+    }
+    
+    // Set notification description
+    fun setNotificationDescription(description: String) {
+        try {
+            val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putString(KEY_NOTIFICATION_DESCRIPTION, description).apply()
+            Log.d(TAG, "Notification description set to: $description")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save notification description", e)
+        }
+    }
+    
+    // Get notification description
+    fun getNotificationDescription(): String {
+        return try {
+            val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_NOTIFICATION_DESCRIPTION, DEFAULT_NOTIFICATION_DESCRIPTION) ?: DEFAULT_NOTIFICATION_DESCRIPTION
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get notification description", e)
+            DEFAULT_NOTIFICATION_DESCRIPTION
+        }
+    }
+    
+    // Get auto-start setting with context (for use before Application is initialized)
+    fun getAutoStart(context: Context): Boolean {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getBoolean(KEY_AUTO_START, false)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get auto-start setting", e)
+            false
+        }
     }
     
     // Set started by user flag

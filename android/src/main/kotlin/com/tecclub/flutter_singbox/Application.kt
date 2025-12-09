@@ -89,6 +89,33 @@ class Application {
         }
         
         /**
+         * Initialize the application if it hasn't been initialized yet
+         * This is used by components that may run before the Flutter engine starts (e.g., BootReceiver)
+         */
+        fun initializeIfNeeded(context: Context) {
+            try {
+                // Check if already initialized
+                application
+            } catch (e: UninitializedPropertyAccessException) {
+                // Not initialized, do it now
+                android.util.Log.d("Application", "Initializing application from external component")
+                initialize(context)
+            }
+        }
+        
+        /**
+         * Check if the application has been initialized
+         */
+        fun isInitialized(): Boolean {
+            return try {
+                application
+                true
+            } catch (e: UninitializedPropertyAccessException) {
+                false
+            }
+        }
+        
+        /**
          * Initialize the libbox library with the application's directories
          */
         private fun initializeLibbox(context: Context) {

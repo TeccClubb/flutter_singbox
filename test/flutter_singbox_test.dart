@@ -93,6 +93,30 @@ class MockFlutterSingboxPlatform
   @override
   // TODO: implement onLogMessage
   Stream<Map<String, dynamic>> get onLogMessage => throw UnimplementedError();
+
+  @override
+  Future<String> getNotificationDescription() {
+    // TODO: implement getNotificationDescription
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<String> getNotificationTitle() {
+    // TODO: implement getNotificationTitle
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> setNotificationDescription(String description) {
+    // TODO: implement setNotificationDescription
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> setNotificationTitle(String title) {
+    // TODO: implement setNotificationTitle
+    throw UnimplementedError();
+  }
 }
 
 void main() {

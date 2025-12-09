@@ -315,6 +315,11 @@ class BoxService(
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
         android.util.Log.e("BoxService", "stopAndAlert called: ${type.name}, message: $message")
         withContext(Dispatchers.Main) {
+            // CRITICAL: Must call startForeground before stopping to avoid Android crash
+            // When startForegroundService is called, we MUST call startForeground within ~5 seconds
+            android.util.Log.e("BoxService", "Showing error notification before stopping")
+            notification.show("Error", message ?: type.name)
+            
             if (receiverRegistered) {
                 android.util.Log.e("BoxService", "Unregistering broadcast receivers")
                 service.unregisterReceiver(receiver)
@@ -341,6 +346,10 @@ class BoxService(
                 }
             )
             
+            // Stop the service itself
+            android.util.Log.e("BoxService", "Stopping service")
+            service.stopSelf()
+            
             android.util.Log.e("BoxService", "Alert handling complete")
         }
     }
@@ -349,6 +358,12 @@ class BoxService(
     @Suppress("SameReturnValue")
     internal fun onStartCommand(): Int {
         android.util.Log.e("BoxService", "onStartCommand called, current status: ${status.value}")
+        
+        // CRITICAL: Call startForeground IMMEDIATELY to prevent Android from killing the app
+        // This must happen synchronously before any async work
+        android.util.Log.e("BoxService", "Starting foreground notification immediately")
+        notification.show("SingBox VPN", "Starting...")
+        
         if (status.value != Status.Stopped) {
             android.util.Log.e("BoxService", "Service already running, not restarting")
             return Service.START_NOT_STICKY

@@ -22,7 +22,7 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
   final EventChannel _trafficEventChannel = const EventChannel(
     'com.tecclub.flutter_singbox/traffic_events',
   );
-  
+
   /// Event channel for log messages
   final EventChannel _logEventChannel = const EventChannel(
     'com.tecclub.flutter_singbox/log_events',
@@ -33,7 +33,7 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
 
   /// Stream controller for traffic stats
   late final StreamController<Map<String, dynamic>> _trafficStreamController;
-  
+
   /// Stream controller for log messages
   late final StreamController<Map<String, dynamic>> _logStreamController;
 
@@ -43,8 +43,7 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
         StreamController<Map<String, dynamic>>.broadcast();
     _trafficStreamController =
         StreamController<Map<String, dynamic>>.broadcast();
-    _logStreamController =
-        StreamController<Map<String, dynamic>>.broadcast();
+    _logStreamController = StreamController<Map<String, dynamic>>.broadcast();
 
     // Listen to status events
     _statusEventChannel.receiveBroadcastStream().listen((event) {
@@ -59,7 +58,7 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
         _trafficStreamController.add(Map<String, dynamic>.from(event));
       }
     });
-    
+
     // Listen to log events
     _logEventChannel.receiveBroadcastStream().listen((event) {
       if (event is Map) {
@@ -157,21 +156,54 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
     if (apps == null) return [];
     return apps.map((app) => Map<String, dynamic>.from(app as Map)).toList();
   }
-  
+
   @override
-  Stream<Map<String, dynamic>> get onLogMessage =>
-      _logStreamController.stream;
-  
+  Stream<Map<String, dynamic>> get onLogMessage => _logStreamController.stream;
+
   @override
   Future<List<String>> getLogs() async {
     final logs = await methodChannel.invokeMethod<List<dynamic>>('getLogs');
     if (logs == null) return [];
     return logs.cast<String>();
   }
-  
+
   @override
   Future<bool> clearLogs() async {
     final result = await methodChannel.invokeMethod<bool>('clearLogs');
     return result ?? false;
+  }
+
+  @override
+  Future<bool> setNotificationTitle(String title) async {
+    final result = await methodChannel.invokeMethod<bool>(
+      'setNotificationTitle',
+      {'title': title},
+    );
+    return result ?? false;
+  }
+
+  @override
+  Future<String> getNotificationTitle() async {
+    final title = await methodChannel.invokeMethod<String>(
+      'getNotificationTitle',
+    );
+    return title ?? 'VPN Service';
+  }
+
+  @override
+  Future<bool> setNotificationDescription(String description) async {
+    final result = await methodChannel.invokeMethod<bool>(
+      'setNotificationDescription',
+      {'description': description},
+    );
+    return result ?? false;
+  }
+
+  @override
+  Future<String> getNotificationDescription() async {
+    final description = await methodChannel.invokeMethod<String>(
+      'getNotificationDescription',
+    );
+    return description ?? 'Connected';
   }
 }

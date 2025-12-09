@@ -6,6 +6,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_singbox/flutter_singbox.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'per_app_tunneling_page.dart';
 
 // Global instance of FlutterSingbox to share across the app
@@ -92,6 +93,11 @@ class _HomePageState extends State<HomePage> {
       //     'Unknown platform version';
 
       // Get current VPN status and log it
+      Permission.notification.request();
+      _flutterSingboxPlugin.setNotificationTitle('SafePro VPN');
+      _flutterSingboxPlugin.setNotificationDescription(
+        'Your secure VPN connection is active',
+      );
       final vpnStatus = await _flutterSingboxPlugin.getVPNStatus();
       print('Initial VPN status: $vpnStatus');
 
@@ -532,131 +538,117 @@ class _HomePageState extends State<HomePage> {
 
 String sampleConfig = '''
 {
-  "dns": {
-    "final": "local-dns",
-    "rules": [
-      {
-        "clash_mode": "Global",
-        "server": "proxy-dns",
-        "source_ip_cidr": ["172.19.0.0/30"]
-      },
-      {
-        "server": "proxy-dns",
-        "source_ip_cidr": ["172.19.0.0/30"]
-      },
-      {
-        "clash_mode": "Direct",
-        "server": "direct-dns"
-      }
-    ],
-    "servers": [
-      {
-        "address": "tls://208.67.222.123",
-        "address_resolver": "local-dns",
-        "detour": "proxy",
-        "tag": "proxy-dns"
-      },
-      {
-        "address": "local",
-        "detour": "direct",
-        "tag": "local-dns"
-      },
-      {
-        "address": "rcode://success",
-        "tag": "block"
-      },
-      {
-        "address": "local",
-        "detour": "direct",
-        "tag": "direct-dns"
-      }
-    ],
-    "strategy": "prefer_ipv4"
-  },
-  "inbounds": [
-    {
-      "address": ["172.19.0.1/30"],
-      "auto_route": true,
-      "endpoint_independent_nat": false,
-      "interface_name": "sing-tun",
-      "mtu": 9000,
-      "platform": {
-        "http_proxy": {
-          "enabled": true,
-          "server": "127.0.0.1",
-          "server_port": 2080
-        }
-      },
-      "sniff": true,
-      "stack": "system",
-      "strict_route": false,
-      "type": "tun"
+    "log": {
+        "level": "debug",
+        "disabled": false,
+        "timestamp": true
     },
-    {
-      "listen": "127.0.0.1",
-      "listen_port": 2080,
-      "sniff": true,
-      "type": "mixed",
-      "users": []
-    }
-  ],
-  "outbounds": [
-    {
-      "tag": "proxy",
-      "type": "selector",
-      "outbounds": ["auto", "Hysteria2", "direct"]
-    },
-    {
-      "tag": "auto",
-      "type": "urltest",
-      "outbounds": ["Hysteria2"],
-      "url": "http://www.gstatic.com/generate_204",
-      "interval": "10m",
-      "tolerance": 50
-    },
-    {
-      "tag": "direct",
-      "type": "direct"
-    },
-    {
-      "tag": "dns-out",
-      "type": "dns"
-    },
-    {
-            "type": "hysteria2",
-            "tag": "Hysteria2",
-            "server": "hk-4.tecclubx.com",
-            "server_port": 443,
-            "up_mbps": 200,
-            "down_mbps": 1000,
-            "password": "0bd33c77-fb77-4b21-b310-91aec507cc3f",
-            "tls": {
-                "enabled": true,
-                "insecure": false,
-                "server_name": "hk-4.tecclubx.com",
-                "alpn": [
-                    "h3"
+    "dns": {
+        "final": "local-dns",
+        "rules": [
+            {
+                "clash_mode": "Global",
+                "server": "proxy-dns",
+                "source_ip_cidr": [
+                    "172.19.0.0/30"
                 ]
+            },
+            {
+                "server": "proxy-dns",
+                "source_ip_cidr": [
+                    "172.19.0.0/30"
+                ]
+            },
+            {
+                "clash_mode": "Direct",
+                "server": "direct-dns"
             }
+        ],
+        "servers": [
+            {
+                "address": "tls://208.67.222.123",
+                "address_resolver": "local-dns",
+                "detour": "proxy",
+                "tag": "proxy-dns"
+            },
+            {
+                "address": "local",
+                "detour": "direct",
+                "tag": "local-dns"
+            },
+            {
+                "address": "rcode://success",
+                "tag": "block"
+            },
+            {
+                "address": "local",
+                "detour": "direct",
+                "tag": "direct-dns"
+            }
+        ],
+        "strategy": "prefer_ipv4"
+    },
+    "inbounds": [
+        {
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "tun0",
+            "inet4_address": "172.19.0.1/30",
+            "mtu": 1400,
+            "auto_route": true,
+            "strict_route": true,
+            "stack": "mixed",
+            "sniff": true,
+            "sniff_override_destination": false,
+            "domain_strategy": "ipv4_only"
         }
-  ],
-  "route": {
-    "auto_detect_interface": true,
-    "final": "proxy",
-    "rules": [
-      {
-        "clash_mode": "Direct",
-        "outbound": "direct"
-      },
-      {
-        "clash_mode": "Global",
-        "outbound": "proxy"
-      },
-      {
-        "protocol": "dns",
-        "outbound": "dns-out"
-      }
-    ]
-  }
+    ],
+    "outbounds": [
+        {
+            "tag": "proxy",
+            "type": "selector",
+            "outbounds": [
+                "chained"
+            ]
+        },
+        {
+            "type": "wireguard",
+            "tag": "chained",
+            "server": "205.198.86.198",
+            "server_port": 443,
+            "local_address": [
+                "10.0.0.3/16"
+            ],
+            "private_key": "qI1BqT25ylggqfCaL7CncBDLxEo3+urBaop18Rx7oH0=",
+            "peer_public_key": "tlcyqr3tGZwhZHJkGE51NMtzMw1zbeifCe699MEg1lU=",
+            "mtu": 1280
+        },
+        {
+            "tag": "dns-out",
+            "type": "dns"
+        },
+        {
+            "tag": "direct",
+            "type": "direct"
+        }
+    ],
+    "route": {
+        "auto_detect_interface": true,
+        "final": "proxy",
+        "rules": [
+            {
+                "clash_mode": "Direct",
+                "outbound": "direct"
+            },
+            {
+                "clash_mode": "Global",
+                "outbound": "proxy"
+            },
+            {
+                "protocol": "dns",
+                "outbound": "dns-out"
+            }
+        ]
+    }
 }
 ''';
