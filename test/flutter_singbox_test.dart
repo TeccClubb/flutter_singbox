@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_singbox/flutter_singbox.dart';
-import 'package:flutter_singbox/flutter_singbox_platform_interface.dart';
-import 'package:flutter_singbox/flutter_singbox_method_channel.dart';
+import 'package:flutter_singbox_vpn/flutter_singbox.dart';
+import 'package:flutter_singbox_vpn/flutter_singbox_platform_interface.dart';
+import 'package:flutter_singbox_vpn/flutter_singbox_method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 class MockFlutterSingboxPlatform
