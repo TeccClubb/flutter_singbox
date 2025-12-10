@@ -2,7 +2,7 @@
 
 A Flutter plugin for integrating [Sing-Box](https://sing-box.sagernet.org/) VPN functionality into your Flutter applications. This plugin provides a complete bridge to the native Sing-Box implementation on Android.
 
-[![pub package](https://img.shields.io/pub/v/flutter_singbox.svg)](https://pub.dev/packages/flutter_singbox)
+[![pub package](https://img.shields.io/pub/v/flutter_singbox_vpn.svg)](https://pub.dev/packages/flutter_singbox_vpn)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
