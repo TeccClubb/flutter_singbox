@@ -99,7 +99,7 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.0.0"
-  flutter_singbox:
+  flutter_singbox_vpn:
     dependency: "direct main"
     description:
       path: ".."

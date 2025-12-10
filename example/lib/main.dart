@@ -5,7 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_singbox/flutter_singbox.dart';
+import 'package:flutter_singbox_vpn/flutter_singbox.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'per_app_tunneling_page.dart';
 

@@ -23,7 +23,7 @@ dependencies:
   permission_handler: 
   google_fonts: ^6.3.2
   google_nav_bar: ^5.0.7
-  flutter_singbox:
+  flutter_singbox_vpn:
     # When depending on this package from a real application you should use:
     #   flutter_singbox: ^x.y.z
     # See https://dart.dev/tools/pub/dependencies#version-constraints
