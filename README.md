@@ -40,7 +40,7 @@ Add the plugin to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_singbox: ^1.1.0
+  flutter_singbox_vpn: ^1.1.2
 ```
 
 Then run:
@@ -78,14 +78,26 @@ Add the required permissions:
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Required Permissions -->
+    <!-- Essential VPN permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
+    
+    <!-- Foreground service permissions - Required for VPN to run in background -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Network and connectivity -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    
+    <!-- Notifications - Show VPN status -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Boot receiver - Auto-start VPN if enabled -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    
+    <!-- Per-app tunneling - Query installed apps -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     
     <application
@@ -127,7 +139,7 @@ dependencyResolutionManagement {
 ### Initialize the Plugin
 
 ```dart
-import 'package:flutter_singbox/flutter_singbox.dart';
+import 'package:flutter_singbox_vpn/flutter_singbox.dart';
 
 final flutterSingbox = FlutterSingbox();
 ```
@@ -273,7 +285,7 @@ for (var app in installedApps) {
 ```dart
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_singbox/flutter_singbox.dart';
+import 'package:flutter_singbox_vpn/flutter_singbox.dart';
 
 void main() => runApp(MyApp());
 

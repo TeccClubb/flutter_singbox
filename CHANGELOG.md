@@ -1,3 +1,10 @@
+## 1.1.2
+
+* Removed unnecessary location permissions (ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION, ACCESS_BACKGROUND_LOCATION)
+* Removed REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission
+* Added clear documentation for all required permissions in AndroidManifest
+* Improved permission structure with categorized comments
+
 ## 1.1.1
 
 * Fixed app launcher icon being overridden by plugin drawable
