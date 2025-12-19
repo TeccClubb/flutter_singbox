@@ -1,3 +1,8 @@
+## 1.1.3
+
+* Fixed iOS podspec file name and metadata to match package name (flutter_singbox_vpn)
+* Updated podspec version and author information
+
 ## 1.1.2
 
 * Removed unnecessary location permissions (ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION, ACCESS_BACKGROUND_LOCATION)
